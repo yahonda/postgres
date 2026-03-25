@@ -1349,6 +1349,64 @@ UPDATE pktable SET id = 10 WHERE id = 5;
 -- doesn't match PK, but no error.
 INSERT INTO fktable VALUES (0, 20);
 ROLLBACK;
+-- verify that tgdeferrable/tginitdeferred are preserved after NOT ENFORCED -> ENFORCED
+ALTER TABLE FKTABLE ALTER CONSTRAINT fktable_fk_fkey DEFERRABLE INITIALLY DEFERRED;
+ALTER TABLE FKTABLE ALTER CONSTRAINT fktable_fk_fkey NOT ENFORCED;
+ALTER TABLE FKTABLE ALTER CONSTRAINT fktable_fk_fkey ENFORCED;
+SELECT tgdeferrable, tginitdeferred FROM pg_trigger
+WHERE tgconstraint = (SELECT oid FROM pg_constraint
+                      WHERE conrelid = 'fktable'::regclass
+                      AND conname = 'fktable_fk_fkey');
+ tgdeferrable | tginitdeferred 
+--------------+----------------
+ t            | t
+ t            | t
+ t            | t
+ t            | t
+(4 rows)
+
+-- verify actual behavior: violation should be deferred to end of transaction
+BEGIN;
+-- doesn't match PK, but no error yet (INITIALLY DEFERRED)
+INSERT INTO fktable VALUES (2, 20);
+-- should catch error from INSERT at commit
+COMMIT;
+ERROR:  insert or update on table "fktable" violates foreign key constraint "fktable_fk_fkey"
+DETAIL:  Key (fk)=(20) is not present in table "pktable".
+-- reset
+ALTER TABLE FKTABLE ALTER CONSTRAINT fktable_fk_fkey NOT DEFERRABLE;
+-- same, but with DEFERRABLE INITIALLY IMMEDIATE: tginitdeferred should be false
+ALTER TABLE FKTABLE ALTER CONSTRAINT fktable_fk_fkey DEFERRABLE INITIALLY IMMEDIATE;
+ALTER TABLE FKTABLE ALTER CONSTRAINT fktable_fk_fkey NOT ENFORCED;
+ALTER TABLE FKTABLE ALTER CONSTRAINT fktable_fk_fkey ENFORCED;
+SELECT tgdeferrable, tginitdeferred FROM pg_trigger
+WHERE tgconstraint = (SELECT oid FROM pg_constraint
+                      WHERE conrelid = 'fktable'::regclass
+                      AND conname = 'fktable_fk_fkey');
+ tgdeferrable | tginitdeferred 
+--------------+----------------
+ t            | f
+ t            | f
+ t            | f
+ t            | f
+(4 rows)
+
+-- verify actual behavior: violation should be caught immediately (INITIALLY IMMEDIATE)
+-- doesn't match PK, error at INSERT time
+INSERT INTO fktable VALUES (2, 20);
+ERROR:  insert or update on table "fktable" violates foreign key constraint "fktable_fk_fkey"
+DETAIL:  Key (fk)=(20) is not present in table "pktable".
+-- verify that SET CONSTRAINTS DEFERRED still works
+BEGIN;
+SET CONSTRAINTS fktable_fk_fkey DEFERRED;
+-- doesn't match PK, but no error yet (explicitly deferred)
+INSERT INTO fktable VALUES (2, 20);
+-- should catch error from INSERT at commit
+COMMIT;
+ERROR:  insert or update on table "fktable" violates foreign key constraint "fktable_fk_fkey"
+DETAIL:  Key (fk)=(20) is not present in table "pktable".
+-- reset
+ALTER TABLE FKTABLE ALTER CONSTRAINT fktable_fk_fkey NOT DEFERRABLE;
 -- try additional syntax
 ALTER TABLE fktable ALTER CONSTRAINT fktable_fk_fkey NOT DEFERRABLE;
 -- illegal options

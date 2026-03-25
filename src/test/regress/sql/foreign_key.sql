@@ -1023,6 +1023,42 @@ UPDATE pktable SET id = 10 WHERE id = 5;
 INSERT INTO fktable VALUES (0, 20);
 
 ROLLBACK;
+-- verify that tgdeferrable/tginitdeferred are preserved after NOT ENFORCED -> ENFORCED
+ALTER TABLE FKTABLE ALTER CONSTRAINT fktable_fk_fkey DEFERRABLE INITIALLY DEFERRED;
+ALTER TABLE FKTABLE ALTER CONSTRAINT fktable_fk_fkey NOT ENFORCED;
+ALTER TABLE FKTABLE ALTER CONSTRAINT fktable_fk_fkey ENFORCED;
+SELECT tgdeferrable, tginitdeferred FROM pg_trigger
+WHERE tgconstraint = (SELECT oid FROM pg_constraint
+                      WHERE conrelid = 'fktable'::regclass
+                      AND conname = 'fktable_fk_fkey');
+-- verify actual behavior: violation should be deferred to end of transaction
+BEGIN;
+-- doesn't match PK, but no error yet (INITIALLY DEFERRED)
+INSERT INTO fktable VALUES (2, 20);
+-- should catch error from INSERT at commit
+COMMIT;
+-- reset
+ALTER TABLE FKTABLE ALTER CONSTRAINT fktable_fk_fkey NOT DEFERRABLE;
+-- same, but with DEFERRABLE INITIALLY IMMEDIATE: tginitdeferred should be false
+ALTER TABLE FKTABLE ALTER CONSTRAINT fktable_fk_fkey DEFERRABLE INITIALLY IMMEDIATE;
+ALTER TABLE FKTABLE ALTER CONSTRAINT fktable_fk_fkey NOT ENFORCED;
+ALTER TABLE FKTABLE ALTER CONSTRAINT fktable_fk_fkey ENFORCED;
+SELECT tgdeferrable, tginitdeferred FROM pg_trigger
+WHERE tgconstraint = (SELECT oid FROM pg_constraint
+                      WHERE conrelid = 'fktable'::regclass
+                      AND conname = 'fktable_fk_fkey');
+-- verify actual behavior: violation should be caught immediately (INITIALLY IMMEDIATE)
+-- doesn't match PK, error at INSERT time
+INSERT INTO fktable VALUES (2, 20);
+-- verify that SET CONSTRAINTS DEFERRED still works
+BEGIN;
+SET CONSTRAINTS fktable_fk_fkey DEFERRED;
+-- doesn't match PK, but no error yet (explicitly deferred)
+INSERT INTO fktable VALUES (2, 20);
+-- should catch error from INSERT at commit
+COMMIT;
+-- reset
+ALTER TABLE FKTABLE ALTER CONSTRAINT fktable_fk_fkey NOT DEFERRABLE;
 
 -- try additional syntax
 ALTER TABLE fktable ALTER CONSTRAINT fktable_fk_fkey NOT DEFERRABLE;
