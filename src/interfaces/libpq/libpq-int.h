@@ -464,6 +464,8 @@ struct pg_conn
 	PGAsyncStatusType asyncStatus;
 	PGTransactionStatusType xactStatus; /* never changes to ACTIVE */
 	char		last_sqlstate[6];	/* last reported SQLSTATE */
+	PGresult   *connect_error_result;	/* error the server sent for the
+										 * current connection attempt */
 	bool		options_valid;	/* true if OK to attempt connection */
 	bool		nonblocking;	/* whether this connection is using nonblock
 								 * sending semantics */

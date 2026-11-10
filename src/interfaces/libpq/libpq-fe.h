@@ -69,6 +69,10 @@ extern "C"
 /* Indicates presence of the PQAUTHDATA_OAUTH_BEARER_TOKEN_V2 authdata hook */
 #define LIBPQ_HAS_OAUTH_BEARER_TOKEN_V2 1
 
+/* Features added in PostgreSQL v20: */
+/* Indicates presence of PQconnectionErrorResult */
+#define LIBPQ_HAS_CONNECTION_ERROR_RESULT 1
+
 /*
  * Option flags for PQcopyResult
  */
@@ -423,6 +427,7 @@ extern const char *PQparameterStatus(const PGconn *conn,
 									 const char *paramName);
 extern int	PQprotocolVersion(const PGconn *conn);
 extern int	PQfullProtocolVersion(const PGconn *conn);
+extern PGresult *PQconnectionErrorResult(const PGconn *conn);
 extern int	PQserverVersion(const PGconn *conn);
 extern char *PQerrorMessage(const PGconn *conn);
 extern int	PQsocket(const PGconn *conn);

@@ -694,6 +694,8 @@ pqDropServerData(PGconn *conn)
 
 	/* Reset assorted other per-connection state */
 	conn->last_sqlstate[0] = '\0';
+	PQclear(conn->connect_error_result);
+	conn->connect_error_result = NULL;
 	conn->pversion_negotiated = false;
 	conn->auth_req_received = false;
 	conn->client_finished_auth = false;
@@ -4159,6 +4161,10 @@ keep_going:						/* We will come back to here until there is
 					/* Check to see if we should mention pgpassfile */
 					pgpassfileWarning(conn);
 
+					/* Keep the error for PQconnectionErrorResult() */
+					conn->connect_error_result = conn->result;
+					conn->result = NULL;
+
 					CONNECTION_FAILED();
 				}
 				/* Handle NegotiateProtocolVersion */
@@ -4387,7 +4393,10 @@ keep_going:						/* We will come back to here until there is
 					if (conn->errorMessage.len <= 0 ||
 						conn->errorMessage.data[conn->errorMessage.len - 1] != '\n')
 						appendPQExpBufferChar(&conn->errorMessage, '\n');
-					PQclear(res);
+					if (res->resultStatus == PGRES_FATAL_ERROR)
+						conn->connect_error_result = res;
+					else
+						PQclear(res);
 					goto error_return;
 				}
 
@@ -7704,6 +7713,35 @@ PQerrorMessage(const PGconn *conn)
  * http://msdn.microsoft.com/en-us/library/windows/desktop/cc507522%28v=vs.85%29.aspx
  * http://stackoverflow.com/questions/10817252/why-is-invalid-socket-defined-as-0-in-winsock2-h-c
  */
+/*
+ * PQconnectionErrorResult
+ *		Return a copy of the error the server sent for the last connection
+ *		attempt, or NULL if there is none (for example the attempt failed
+ *		before the server answered).  The caller must PQclear() it.
+ */
+PGresult *
+PQconnectionErrorResult(const PGconn *conn)
+{
+	const PGresult *src;
+	PGresult   *res;
+
+	if (!conn || !conn->connect_error_result)
+		return NULL;
+	src = conn->connect_error_result;
+
+	res = PQmakeEmptyPGresult(NULL, PGRES_FATAL_ERROR);
+	if (!res)
+		return NULL;
+
+	/* errFields is a stack; walking it and pushing again reverses it */
+	for (const PGMessageField *f = src->errFields; f; f = f->next)
+		pqSaveMessageField(res, f->code, f->contents);
+	if (src->errMsg)
+		res->errMsg = pqResultStrdup(res, src->errMsg);
+
+	return res;
+}
+
 int
 PQsocket(const PGconn *conn)
 {
